@@ -22,3 +22,16 @@ The output preserves the source identifiers and timestamps and adds:
 - `voltage`, `current`, `active_power`, `reactive_power`: the documented payload byte pairs converted from hexadecimal and divided by 100
 - `total_energy`: payload bytes 21, 22, 19, 20 converted from hexadecimal and divided by 100
 - `power_factor`: `active_power / reactive_power`, clamped to the range `0` to `1`; a zero reactive power produces `1`
+
+## Power usage UI
+
+Install dependencies and start the BMS preview at `http://localhost:3000`:
+
+```sh
+yarn install --production=false
+yarn dev
+```
+
+The screen supports filtering by time period, room, device group, and channel; selecting
+Voltage, Current, Active Power, Reactive Power, Current Total Energy, or Power Factor; and
+exporting the visible chart as PNG or PDF.
