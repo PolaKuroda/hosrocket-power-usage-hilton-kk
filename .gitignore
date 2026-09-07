@@ -1,0 +1,28 @@
+*~
+.DS_Store
+*.lnk
+**/*.lnk
+*.exe
+**/*.exe
+*.config
+*.logfile
+**/*.logfile
+node_modules
+
+# Anchored to the repo root on purpose: unanchored `data` also matched
+# `src/data/`, which holds the portal's page tree.
+/log
+/data
+/output
+
+# Build output
+dist
+
+# Package managers — this repo is yarn only
+package-lock.json
+pnpm-lock.yaml
+yarn-error.log
+
+# Tooling caches
+.cache
+.ttsc
