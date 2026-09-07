@@ -1,5 +1,10 @@
 # hosrocket-power-usage-hilton-kk
 
+## Documentation
+
+- [Power Usage Dashboard guide](docs/power-usage-dashboard.md)
+- [Release notes](RELEASE_NOTES.md)
+
 ## Prepare power usage data
 
 The transformer reads a named CSV file from `data/` and writes chart-ready data to `output/`.
