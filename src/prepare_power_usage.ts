@@ -1,4 +1,4 @@
-import {mkdir, readFile, writeFile} from 'node:fs/promises';
+import {mkdir, readdir, readFile, writeFile} from 'node:fs/promises';
 import {basename, dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -7,7 +7,7 @@ type CsvRow = Record<string, string>;
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const projectDirectory = resolve(scriptDirectory, '..');
 const defaultInputPath = resolve(projectDirectory, 'data');
-const defaultOutputPath = resolve(projectDirectory, 'output/power_usage_preview.csv');
+const outputDirectory = resolve(projectDirectory, 'output');
 
 const outputColumns = [
 	'SITE_TIME',
@@ -137,26 +137,58 @@ function prepareRow(row: CsvRow, rowNumber: number): CsvRow {
 	};
 }
 
-async function findInputCsv(inputPath: string): Promise<string> {
-	const entries = await (await import('node:fs/promises')).readdir(inputPath, {withFileTypes: true});
-	const csvFile = entries.find((entry) => entry.isFile() && entry.name.endsWith('.csv'));
-	if (!csvFile) {
-		throw new Error(`No CSV file found in ${inputPath}`);
+async function listInputCsvs(): Promise<string[]> {
+	const entries = await readdir(defaultInputPath, {withFileTypes: true});
+	return entries
+		.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.csv'))
+		.map((entry) => entry.name)
+		.sort();
+}
+
+async function findInputCsv(fileName: string | undefined): Promise<string> {
+	const availableFiles = await listInputCsvs();
+	if (!fileName || !availableFiles.includes(basename(fileName))) {
+		console.error(fileName ? `Data file not found: ${fileName}` : 'Please provide a data file name.');
+		console.error('Available data files:');
+		availableFiles.forEach((availableFile) => console.error(`  ${availableFile}`));
+		throw new Error('Choose a file with: npm run prepare-data -- <file name>');
 	}
 
-	return resolve(inputPath, csvFile.name);
+	return resolve(defaultInputPath, basename(fileName));
+}
+
+function formatDatasetDate(siteTime: string, rowNumber: number): string {
+	const date = siteTime.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+	if (!date) {
+		throw new Error(`Row ${rowNumber} has an invalid SITE_TIME: ${siteTime}`);
+	}
+
+	return date.replaceAll('-', '');
+}
+
+function createOutputPath(rows: CsvRow[]): string {
+	const roomSlugs = [...new Set(rows.map((row) => row.room_slug).filter(Boolean))];
+	const roomName = roomSlugs.length === 1 ? roomSlugs[0] : 'All Rooms';
+	const datasetDates = rows.map((row, index) => formatDatasetDate(row.SITE_TIME, index + 2)).sort();
+	const startDate = datasetDates[0];
+	const endDate = datasetDates[datasetDates.length - 1];
+
+	return resolve(outputDirectory, `Room ${roomName} - Power Usage - ${startDate} to ${endDate}.csv`);
 }
 
 async function main(): Promise<void> {
 	const inputArgument = process.argv[2];
-	const outputPath = process.argv[3] ? resolve(process.argv[3]) : defaultOutputPath;
-	const inputPath = inputArgument ? resolve(inputArgument) : await findInputCsv(defaultInputPath);
+	const inputPath = await findInputCsv(inputArgument);
 	const input = await readFile(inputPath, 'utf8');
 	const rows = parseCsv(input).map((row, index) => prepareRow(row, index + 2));
+	const outputPath = createOutputPath(rows);
 
-	await mkdir(dirname(outputPath), {recursive: true});
+	await mkdir(outputDirectory, {recursive: true});
 	await writeFile(outputPath, encodeCsv(rows), 'utf8');
 	console.log(`Prepared ${rows.length} rows from ${basename(inputPath)} into ${outputPath}`);
 }
 
-await main();
+await main().catch((error: Error) => {
+	console.error(error.message);
+	process.exitCode = 1;
+});

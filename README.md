@@ -2,17 +2,18 @@
 
 ## Prepare power usage data
 
-The transformer reads the first CSV file in `data/` and writes chart-ready data to
-`output/power_usage_preview.csv`:
+The transformer reads a named CSV file from `data/` and writes chart-ready data to `output/`.
+The output name includes the room and the dataset's `SITE_TIME` date range:
 
 ```sh
-npm run prepare-data
+npm run prepare-data -- bq-results-20260907-002921-1788740981799.csv
 ```
 
-An input CSV and output path can also be supplied explicitly:
+If the file name is omitted or does not exist, the command prints the available CSV files.
+The generated file follows this format:
 
-```sh
-npm run prepare-data -- ./data/input.csv ./output/preview.csv
+```text
+output/Room 731 - Power Usage - 20260902 to 20260907.csv
 ```
 
 The output preserves the source identifiers and timestamps and adds:
