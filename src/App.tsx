@@ -25,6 +25,17 @@ type PowerRow = {
 
 type Metric = keyof Pick<PowerRow, 'voltage' | 'current' | 'active_power' | 'reactive_power' | 'total_energy' | 'power_factor'>;
 
+type DatasetManifest = {
+	files: string[];
+};
+
+type ChannelSelection = {
+	key: string;
+	deviceGroup: string;
+	channel: string;
+	label: string;
+};
+
 const metrics: {key: Metric; label: string; unit: string; color: string}[] = [
 	{key: 'voltage', label: 'Voltage', unit: 'V', color: '#2b6bbf'},
 	{key: 'current', label: 'Current', unit: 'A', color: '#ffa647'},
@@ -40,84 +51,139 @@ const timePeriods = [
 	{value: '7d', label: 'Last 7 days'}
 ];
 
+const channelColors = ['#2b6bbf', '#ffa647', '#27AE60', '#504f78', '#fc7b7b', '#00a6a6', '#d26a2e', '#8a65a5'];
+
 function displayTime(value: string): string {
 	return value.replace(/\sUTC$/, '');
 }
 
 export function App(): JSX.Element {
 	const [rows, setRows] = useState<PowerRow[]>([]);
+	const [datasets, setDatasets] = useState<string[]>([]);
+	const [selectedDataset, setSelectedDataset] = useState('');
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [room, setRoom] = useState('all');
 	const [period, setPeriod] = useState('all');
-	const [deviceGroup, setDeviceGroup] = useState('all');
-	const [channel, setChannel] = useState('all');
+	const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+	const [channelMenuOpen, setChannelMenuOpen] = useState(false);
 	const [selectedMetrics, setSelectedMetrics] = useState<Metric[]>(['active_power', 'total_energy']);
 	const chartCanvas = useRef<HTMLCanvasElement>(null);
 	const chart = useRef<Chart | null>(null);
 
 	useEffect(() => {
-		fetch('/output/power_usage_preview.csv')
+		fetch('/output/datasets.json')
 			.then((response) => {
-				if (!response.ok) throw new Error('Unable to load the prepared power usage CSV.');
+				if (!response.ok) throw new Error('Unable to load the prepared output datasets.');
+				return response.json() as Promise<DatasetManifest>;
+			})
+			.then((manifest) => {
+				if (manifest.files.length === 0) throw new Error('No prepared datasets are available in output.');
+				setDatasets(manifest.files);
+				setSelectedDataset(manifest.files[0]);
+			})
+			.catch((error: Error) => setLoadError(error.message));
+	}, []);
+
+	useEffect(() => {
+		if (!selectedDataset) return;
+		setRows([]);
+		setLoadError(null);
+		fetch(`/output/${encodeURIComponent(selectedDataset)}`)
+			.then((response) => {
+				if (!response.ok) throw new Error(`Unable to load ${selectedDataset}.`);
 				return response.text();
 			})
 			.then((csv) => {
 				const result = Papa.parse<PowerRow>(csv, {header: true, skipEmptyLines: true});
 				if (result.errors.length > 0) throw new Error(result.errors[0].message);
-				setRows(result.data);
+				setRows(result.data.sort((first, second) => first.SITE_TIME.localeCompare(second.SITE_TIME)));
 			})
 			.catch((error: Error) => setLoadError(error.message));
-	}, []);
+	}, [selectedDataset]);
 
 	const rooms = useMemo(() => [...new Set(rows.map((row) => row.room_slug))].sort(), [rows]);
-	const groups = useMemo(() => [...new Set(rows.map((row) => row.device_group))].sort(), [rows]);
-	const channels = useMemo(() => [...new Set(rows.map((row) => row.channel))].sort(), [rows]);
+	const channelSelections = useMemo<ChannelSelection[]>(() => [...new Set(rows.map((row) => `${row.device_group}:${row.channel}`))]
+		.map((key) => {
+			const [deviceGroup, channel] = key.split(':');
+			return {key, deviceGroup, channel, label: `Group ${deviceGroup} - Ch${channel}`};
+		})
+		.sort((first, second) => first.label.localeCompare(second.label, undefined, {numeric: true})), [rows]);
+
+	useEffect(() => {
+		if (selectedChannels.length === 0 && channelSelections.length > 0) {
+			setSelectedChannels(channelSelections.map((selection) => selection.key));
+		}
+	}, [channelSelections, selectedChannels.length]);
 
 	const filteredRows = useMemo(() => {
 		const periodStart = period === '24h' ? Date.now() - 24 * 60 * 60 * 1000 : period === '7d' ? Date.now() - 7 * 24 * 60 * 60 * 1000 : 0;
 		return rows.filter((row) => {
 			const time = Date.parse(displayTime(row.SITE_TIME).replace(' ', 'T'));
 			return (room === 'all' || row.room_slug === room) &&
-				(deviceGroup === 'all' || row.device_group === deviceGroup) &&
-				(channel === 'all' || row.channel === channel) &&
+				(selectedChannels.length === 0 || selectedChannels.includes(`${row.device_group}:${row.channel}`)) &&
 				(periodStart === 0 || time >= periodStart);
 		});
-	}, [rows, room, period, deviceGroup, channel]);
+	}, [rows, room, period, selectedChannels]);
 
 	useEffect(() => {
-		if (!chartCanvas.current || filteredRows.length === 0 || selectedMetrics.length === 0) return;
 		chart.current?.destroy();
-		const labels = filteredRows.map((row) => displayTime(row.SITE_TIME));
-		const datasets = selectedMetrics.map((metric) => {
+		if (!chartCanvas.current || filteredRows.length === 0 || selectedMetrics.length === 0) return;
+		const datasets = selectedChannels.flatMap((selectionKey) => selectedMetrics.map((metric) => {
+			const selection = channelSelections.find((item) => item.key === selectionKey)!;
 			const definition = metrics.find((item) => item.key === metric)!;
+			const color = channelColors[channelSelections.findIndex((item) => item.key === selectionKey) % channelColors.length];
 			return {
-				label: `${definition.label}${definition.unit ? ` (${definition.unit})` : ''}`,
-				data: filteredRows.map((row) => Number(row[metric])),
-				borderColor: definition.color,
-				backgroundColor: definition.color,
+				label: `${selection.label} · ${definition.label}${definition.unit ? ` (${definition.unit})` : ''}`,
+				data: filteredRows.filter((row) => `${row.device_group}:${row.channel}` === selectionKey).map((row) => ({
+					x: Date.parse(displayTime(row.SITE_TIME).replace(' ', 'T')),
+					y: Number(row[metric])
+				})),
+				borderColor: color,
+				backgroundColor: color,
 				borderWidth: 2,
 				pointRadius: filteredRows.length > 100 ? 0 : 2,
 				tension: 0.25,
 				fill: false
 			};
-		});
+		}));
 		const configuration: ChartConfiguration = {
 			type: 'line',
-			data: {labels, datasets},
+			data: {datasets},
 			options: {
 				responsive: true,
 				maintainAspectRatio: false,
 				interaction: {mode: 'index', intersect: false},
-				plugins: {legend: {position: 'bottom', labels: {usePointStyle: true, padding: 20}}, tooltip: {padding: 10}},
-				scales: {x: {grid: {display: false}, ticks: {maxTicksLimit: 8, maxRotation: 0}}, y: {beginAtZero: true, grid: {color: '#ecf0f1'}}}
+				plugins: {
+					legend: {position: 'bottom', labels: {usePointStyle: true, padding: 20}},
+					tooltip: {padding: 10, callbacks: {title: (items) => items[0] ? new Date(Number(items[0].parsed.x)).toLocaleString() : ''}}
+				},
+				scales: {
+					x: {
+						type: 'linear',
+						grid: {color: '#ecf0f1'},
+						ticks: {
+							stepSize: 4 * 60 * 60 * 1000,
+							maxTicksLimit: 40,
+							minRotation: 90,
+							maxRotation: 90,
+							callback: (value) => {
+								const date = new Date(Number(value));
+								return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+							}
+						}
+					},
+					y: {beginAtZero: true, grid: {color: '#ecf0f1'}}
+				}
 			}
 		};
 		chart.current = new Chart(chartCanvas.current, configuration);
 		return () => chart.current?.destroy();
-	}, [filteredRows, selectedMetrics]);
+	}, [filteredRows, selectedMetrics, selectedChannels, channelSelections]);
 
 	const toggleMetric = (metric: Metric) => setSelectedMetrics((current) => current.includes(metric) ? current.filter((item) => item !== metric) : [...current, metric]);
+	const toggleChannel = (selectionKey: string) => setSelectedChannels((current) => current.includes(selectionKey) ? current.filter((item) => item !== selectionKey) : [...current, selectionKey]);
 	const title = `Room ${room === 'all' ? 'All Rooms' : room} - Power Usage`;
+	const selectedChannelLabel = selectedChannels.length === channelSelections.length ? 'All group channels' : `${selectedChannels.length} selected`;
 
 	const exportPng = () => {
 		if (!chart.current) return;
@@ -154,11 +220,10 @@ export function App(): JSX.Element {
 					<section className="control-panel" aria-label="Chart filters">
 						<div className="panel-heading"><span><FontAwesomeIcon icon={faSliders} className="me-2" />Chart options</span><span className="small-muted">{rows.length.toLocaleString()} total readings</span></div>
 						<Row className="g-3">
-							<Col md={6} xl={3}><Form.Label>Data source</Form.Label><Form.Select value="prepared" disabled><option value="prepared">Power usage preview CSV</option></Form.Select></Col>
+							<Col md={6} xl={3}><Form.Label>Data source</Form.Label><Form.Select value={selectedDataset} onChange={(event) => setSelectedDataset(event.target.value)} disabled={datasets.length === 0}>{datasets.map((dataset) => <option key={dataset} value={dataset}>{dataset}</option>)}</Form.Select></Col>
 							<Col md={6} xl={2}><Form.Label>Time period</Form.Label><Form.Select value={period} onChange={(event) => setPeriod(event.target.value)}>{timePeriods.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</Form.Select></Col>
 							<Col md={4} xl={2}><Form.Label>Room</Form.Label><Form.Select value={room} onChange={(event) => setRoom(event.target.value)}><option value="all">All rooms</option>{rooms.map((item) => <option key={item} value={item}>{item}</option>)}</Form.Select></Col>
-							<Col md={4} xl={2}><Form.Label>Device group</Form.Label><Form.Select value={deviceGroup} onChange={(event) => setDeviceGroup(event.target.value)}><option value="all">All groups</option>{groups.map((item) => <option key={item} value={item}>Group {item}</option>)}</Form.Select></Col>
-							<Col md={4} xl={2}><Form.Label>Channel</Form.Label><Form.Select value={channel} onChange={(event) => setChannel(event.target.value)}><option value="all">All channels</option>{channels.map((item) => <option key={item} value={item}>Channel {item}</option>)}</Form.Select></Col>
+							<Col md={6} xl={4}><Form.Label>Device group / channel</Form.Label><div className="channel-picker"><Button variant="light" className="channel-picker-toggle" onClick={() => setChannelMenuOpen((current) => !current)} aria-expanded={channelMenuOpen}>{selectedChannelLabel}<span aria-hidden="true">v</span></Button>{channelMenuOpen && <div className="channel-picker-menu">{channelSelections.map((selection) => <Form.Check key={selection.key} type="checkbox" id={`channel-${selection.key}`} label={selection.label} checked={selectedChannels.includes(selection.key)} onChange={() => toggleChannel(selection.key)} />)}</div>}</div></Col>
 						</Row>
 						<div className="metric-picker"><Form.Label>Data to chart</Form.Label><div className="metric-options">{metrics.map((metric) => <Form.Check key={metric.key} type="checkbox" id={`metric-${metric.key}`} label={`${metric.label}${metric.unit ? ` (${metric.unit})` : ''}`} checked={selectedMetrics.includes(metric.key)} onChange={() => toggleMetric(metric.key)} />)}</div></div>
 					</section>

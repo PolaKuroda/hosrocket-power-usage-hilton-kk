@@ -8,6 +8,7 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const projectDirectory = resolve(scriptDirectory, '..');
 const defaultInputPath = resolve(projectDirectory, 'data');
 const outputDirectory = resolve(projectDirectory, 'output');
+const outputManifestPath = resolve(outputDirectory, 'datasets.json');
 
 const outputColumns = [
 	'SITE_TIME',
@@ -176,6 +177,15 @@ function createOutputPath(rows: CsvRow[]): string {
 	return resolve(outputDirectory, `Room ${roomName} - Power Usage - ${startDate} to ${endDate}.csv`);
 }
 
+async function writeOutputManifest(): Promise<void> {
+	const entries = await readdir(outputDirectory, {withFileTypes: true});
+	const files = entries
+		.filter((entry) => entry.isFile() && entry.name.startsWith('Room ') && entry.name.endsWith('.csv'))
+		.map((entry) => entry.name)
+		.sort();
+	await writeFile(outputManifestPath, JSON.stringify({files}, null, 2) + '\n', 'utf8');
+}
+
 async function main(): Promise<void> {
 	const inputArgument = process.argv[2];
 	const inputPath = await findInputCsv(inputArgument);
@@ -185,6 +195,7 @@ async function main(): Promise<void> {
 
 	await mkdir(outputDirectory, {recursive: true});
 	await writeFile(outputPath, encodeCsv(rows), 'utf8');
+	await writeOutputManifest();
 	console.log(`Prepared ${rows.length} rows from ${basename(inputPath)} into ${outputPath}`);
 }
 

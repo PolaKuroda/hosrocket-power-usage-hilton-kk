@@ -36,3 +36,7 @@ yarn dev
 The screen supports filtering by time period, room, device group, and channel; selecting
 Voltage, Current, Active Power, Reactive Power, Current Total Energy, or Power Factor; and
 exporting the visible chart as PNG or PDF.
+
+The data source selector reads the generated CSV dataset list from `output/datasets.json`.
+Chart points are sorted by ascending `SITE_TIME`, with local-time labels rendered vertically
+on the x-axis for readability.
