@@ -1,0 +1,11 @@
+{
+	"name": "hosrocket-power-usage-hilton-kk",
+	"private": true,
+	"type": "module",
+	"engines": {
+		"node": ">=26"
+	},
+	"scripts": {
+		"prepare-data": "node --experimental-strip-types src/prepare_power_usage.ts"
+	}
+}
