@@ -40,3 +40,8 @@ exporting the visible chart as PNG or PDF.
 The data source selector reads the generated CSV dataset list from `output/datasets.json`.
 Chart points are sorted by ascending `SITE_TIME`, with local-time labels rendered vertically
 on the x-axis for readability.
+
+Power usage chart defaults are configured in [src/config/power_usage.json](src/config/power_usage.json).
+This file controls the default metrics and the display labels for each device group/channel
+combination. It also controls the Peak and Off-Peak site settings. The default chart metric is
+Active Power only, the chart starts at 06:00, and x-axis labels use `YYYY-MM-DD HH:mm` in 24-hour time.
